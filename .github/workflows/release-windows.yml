@@ -1,0 +1,58 @@
+# Builds the Windows release (make dist: LGPL FFmpeg, the swgen game-code generator helper, zig) and attaches the
+# zip to the GitHub release of the pushed tag. No game code, no Nintendo data: the same `make dist` a maintainer runs
+# from an MSYS2 UCRT64 shell (Makefile "dist", docs/BUILD-windows.md); players rebuild the game code from their own
+# dump. Trigger: pushing a v* tag (the zip lands on that tag's release), or manually from the Actions tab (then the
+# zip is just an artifact of the run).
+name: Windows release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make unzip zip mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-vulkan-headers mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-spirv-tools mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-nasm
+      - name: FFmpeg (LGPL, from source)
+        run: make deps-windows
+      - name: Game code generator helper (players need no Python)
+        run: make gen-helper GEN_PY=python
+      - name: Zig (the compiler the setup builds the game code with)
+        run: tools/fetch_zig.sh
+      - name: Build and package the release
+        run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: build/dist/*.zip
+          if-no-files-found: error
+      - name: Attach the zip to the tag's release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" build/dist/*.zip --clobber
