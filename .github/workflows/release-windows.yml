@@ -41,7 +41,16 @@ jobs:
       - name: FFmpeg (LGPL, from source)
         run: make deps-windows
       - name: Game code generator helper (players need no Python)
-        run: make gen-helper GEN_PY=python
+        # GEN_PY: the python.org CPython 3.12 of setup-python (Makefile docs: prebuilt unicorn / capstone wheels).
+        # Plain `python` inside the UCRT64 shell is the mingw python some package pulled in, whose venv layout and
+        # wheels differ - and cygpath keeps sh from eating the backslashes of the Windows path.
+        run: |
+          echo "python: $(which python) ($(python --version 2>&1))"
+          make gen-helper GEN_PY="$(cygpath -u "$pythonLocation")/python.exe" || {
+            echo "--- build/gen-venv tree ---"
+            find build/gen-venv -maxdepth 3 2>/dev/null || true
+            exit 1
+          }
       - name: Zig (the compiler the setup builds the game code with)
         run: tools/fetch_zig.sh
       - name: Build and package the release
